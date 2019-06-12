@@ -19,11 +19,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:6b3366eda4bc1e55f5e3eed10d6d9b2fd9ecc523974805130b6c214f5038db02"
+  digest = "1:0d6352e4643d814d722a871b54a7043314bda718d095d87cba662a15bf5921a0"
   name = "github.com/childe/healer"
   packages = ["."]
   pruneopts = "UT"
-  revision = "50dcbe896c9f3426a12c53dafab92d5b114ec0dd"
+  revision = "00d8c0abb42dba2a9bbc992191978c92bc08d608"
 
 [[projects]]
   digest = "1:2b55f08306f24f60dab51e006c1890db08d34ccc1b92c53a08a1a6e7792e3eb8"

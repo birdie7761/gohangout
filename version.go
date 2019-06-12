@@ -2,13 +2,15 @@ package main
 
 import "fmt"
 
-var version = `
-  name = "github.com/aviddiviner/go-murmur"
+var version = `  1f248cd
+  Mon Jun 3 16:04:27 2019 +0800
+`
+var dependences = `  name = "github.com/aviddiviner/go-murmur"
   revision = "b9740d71e571c1f4ccb570b9bc7f352329d3e600"
   name = "github.com/bkaradzic/go-lz4"
   revision = "74ddf82598bc4745b965729e9c6a463bedd33049"
   name = "github.com/childe/healer"
-  revision = "50dcbe896c9f3426a12c53dafab92d5b114ec0dd"
+  revision = "00d8c0abb42dba2a9bbc992191978c92bc08d608"
   name = "github.com/eapache/go-xerial-snappy"
   revision = "bb955e01b9346ac19dc29eb16586c90ded99a98c"
   name = "github.com/golang/glog"
@@ -29,11 +31,10 @@ var version = `
   revision = "5420a8b6744d3b0345ab293f6fcba19c978f1183"
 `
 
-func init() {
-	printVersion()
-}
-
 func printVersion() {
-	fmt.Println("dependences:")
+	fmt.Println("version:")
 	fmt.Println(version)
+
+	fmt.Println("dependences:")
+	fmt.Println(dependences)
 }
