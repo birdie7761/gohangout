@@ -129,7 +129,6 @@ func (grok *Grok) translateMatchPattern(s string) string {
 		}
 		s = r
 	}
-	return r
 }
 
 type Grok struct {
@@ -179,11 +178,12 @@ type GrokFilter struct {
 	config    map[interface{}]interface{}
 	overwrite bool
 	groks     []*Grok
+	target    string
 	src       string
 	vr        value_render.ValueRender
 }
 
-func NewGrokFilter(config map[interface{}]interface{}) *GrokFilter {
+func (l *MethodLibrary) NewGrokFilter(config map[interface{}]interface{}) *GrokFilter {
 	var patternPaths []string = make([]string, 0)
 	if i, ok := config["pattern_paths"]; ok {
 		for _, p := range i.([]interface{}) {
@@ -208,6 +208,7 @@ func NewGrokFilter(config map[interface{}]interface{}) *GrokFilter {
 		config:    config,
 		groks:     groks,
 		overwrite: true,
+		target:    "",
 	}
 
 	if overwrite, ok := config["overwrite"]; ok {
@@ -221,6 +222,10 @@ func NewGrokFilter(config map[interface{}]interface{}) *GrokFilter {
 	}
 	gf.vr = value_render.GetValueRender2(gf.src)
 
+	if target, ok := config["target"]; ok {
+		gf.target = target.(string)
+	}
+
 	return gf
 }
 
@@ -233,18 +238,24 @@ func (gf *GrokFilter) Filter(event map[string]interface{}) (map[string]interface
 		input = inputI.(string)
 	}
 
-	success := false
 	for _, grok := range gf.groks {
 		rst := grok.grok(input)
 		if len(rst) == 0 {
 			continue
 		}
 
-		for field, value := range rst {
-			event[field] = value
+		if gf.target == "" {
+			for field, value := range rst {
+				event[field] = value
+			}
+		} else {
+			target := make(map[string]interface{})
+			for field, value := range rst {
+				target[field] = value
+			}
+			event[gf.target] = target
 		}
-		success = true
-		break
+		return event, true
 	}
-	return event, success
+	return event, false
 }

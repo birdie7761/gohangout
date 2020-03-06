@@ -10,15 +10,11 @@
 
 ## 安装
 
-### 从源码安装
+可以从源码编译, 或者是直接下载二进制可执行文件
 
-1. 下载依赖包
+### 从源码编译
 
-  使用 dep 管理依赖.
-
-   > dep ensure
-
-2. 编译
+  使用 go module 管理依赖. 直接 make 就可
 
    > make
 
@@ -29,6 +25,10 @@
 ### 下载编译后二进制文件
 
 [https://github.com/childe/gohangout/releases](https://github.com/childe/gohangout/releases) 直接下载
+
+### go get
+
+  > go get github.com/childe/gohangout
 
 
 
@@ -49,7 +49,7 @@ gohangout --config config.yml
 ### pprof debug
 
 - -pprof=true
-默认不开启 pprof
+(默认是不开启 pprof的)
 
 - -pprof-address 127.0.0.1:8899
 pprof 的http地址
@@ -57,18 +57,24 @@ pprof 的http地址
 
 ### 多线程处理
 
+默认是一个线程
+
 --worker 4
-使用四个线程(goroutine)处理数据. 每个线程拥有自己的filter, output. 比如说translate filter, 每个线程有自己的字典, 他们占用多份内存.  elasticsearch output也是一样的, 如果每个 elasticsearch 设置了2并发, 那一共就是8个并发.  默认是一个线程
 
+使用四个线程(goroutine)处理数据. 每个线程拥有自己的filter, output. 比如说translate filter, 每个线程有自己的字典, 他们占用多份内存.  elasticsearch output也是一样的, 如果每个 elasticsearch 设置了2并发, 那一共就是8个并发.
 
+进一步说明一下为什么添加了这个配置:
+
+最开始是没有这个配置的, 如果需要多线程并发处理数据, 依赖 Input 里面的配置, 比如说 Kafka 配置 `topicname: 2` 就是两个线程去消费(需要 Topic 有至少2个Partition, 保证每个线程可以消费到一个 Partition 里面的数据).
+
+但是后面出现一些矛盾, 比如说, Kafka 的 Consumer 个数多的情况下, 给 Kafka 带来更大压力, 可能导致 Rebalance 更频繁等. 所以如果 Kafka 消费数据没有瓶颈的情况下, 希望控制尽量少的 Consumer, 后面多线程的处理这些数据.
 
 ## 开发新的插件
 
-目前只实现了 Filter 的新插件接口. 后面会添加 Input 和 Output.
-
- Filter 插件示例参考  [gohangout-filter-title](https://github.com/childe/gohangout-filter-title)
-
-
+- Filter 插件示例参考  [gohangout-filter-title](https://github.com/childe/gohangout-filter-title)
+- Input 插件示例参考 [gohangout-input-dot](https://github.com/childe/gohangout-input-dot)
+- Output 插件示例参考 [gohangout-output-dash](https://github.com/childe/gohangout-output-dash)
+- Decoder 插件示例参考 [gohangout-decode-empty](https://github.com/childe/gohangout-decode-empty)
 
 
 ## 一个简单的配置
@@ -116,27 +122,50 @@ fields:
     type: 'weblog'
     hostname: '[host]'
     name: '{{.firstname}}.{{.lastname}}'
+    name2: '$.name'
     city: '[geo][cityname]'
     '[a][b]': '[stored][message]'
 ```
 
-### 格式1 [XX][YY]
+### 格式1 JSONPATH 格式
+
+**相比格式2, 更推荐使用这种格式. 更标准, 也灵活, 性能也足够**
+
+如果以 `$.` 开头, 认为是这种格式
+
+给几个下面文中的例子
+
+```
+$.store.book[0].title
+
+$['store']['book'][0]['title']
+
+$.store.book[(@.length-1)].title
+
+$.store.book[?(@.price < 10)].title
+```
+
+具体的格式和例子参见 [https://goessner.net/articles/JsonPath/](https://goessner.net/articles/JsonPath/)
+
+### 格式2 [XX][YY]
+
+**不再推荐使用, 请使用格式1**
 
 `city: '[geo][cityname]'` 是把 geo.cityname 的值赋值给 city 字段. 必须严格 [XX][YY] 格式, 前后不能有别的内容
 
 
-### 格式2 {{XXX}}
+### 格式3 {{XXX}}
 
 如果含有 `{{XXX}}` 的内容, 就认为是 golang template 格式, 具体语法可以参考 [https://golang.org/pkg/text/template/](https://golang.org/pkg/text/template/). 前后及中间可以含有别的内容, 像 `name: 'my name is {{.firstname}}.{{.lastname}}'`
 
-### 格式3 %{XXX}
+### 格式4 %{XXX}
 
 含有 `%{XXX}` 的内容, 使用自己定义的格式处理, 像上面的 `%{date} {%time}` 是把 date 字段和 time 字段组合成一个 logtime 字段. 前后以及中间可以有任何内容. 像 Elasticsearch 中的 index: `web-%{appid}-%{+2006-01-02}` 也是这种格式, %{+XXX} 代表时间字段, 会按时间格式做格式化处理.
 
 2006 01 02 15 06 05 这几个数字是 golang 里面特定的数字, 代表年月日时分秒. 1月2号3点4分5秒06年. 其实就像hangout里面的YYYY MM dd HH mm SS
 
 
-### 格式4 除了1,2,3 之外的其它
+### 格式5 除了1,2,3,4 之外的其它
 
 在不同Filter中, 可能意义不同. 像 Date 中的 src: logtime, 是说取 logtime 字段的值.  
 Elasticsearch 中的 index_type: logs , 这里的 logs 不是指字段名, 就是字面值.
@@ -186,6 +215,7 @@ TCP:
 
 ```
 Kafka:
+    decorate_events: false
     topic:
         weblog: 1
     #assign:
@@ -203,6 +233,12 @@ Kafka:
 ```
 
 **特别注意** 参数需要是字符串, 像 `auto.commit.interval.ms: '5000'` , 以及 `from.beginning: 'true'` , 等等
+
+#### decorate_events
+
+默认为 false
+配置为 true 的话, 可以把 topic/partition/offset 信息添加到 ["@metadata"]["kafka"] 字段中
+
 
 #### topic
 
@@ -274,6 +310,7 @@ Elasticsearch:
         - 'http://10.0.0.100:9200'
         - 'http://admin:password@10.0.0.101:9200'
     index: 'web-%{appid}-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
+    index_time_location: 'Local'
     index_type: "logs"
     bulk_actions: 5000
     routing: '[domain]'
@@ -284,6 +321,14 @@ Elasticsearch:
     compress: false
     retry_response_code: [401, 502]
 ```
+
+#### index_time_location
+
+渲染索引名字时, 使用什么时区. 默认是 UTC. 北京时间 2019-10-25 07:00:00 的日志, 会写到 2019.10.24 这个索引中. 
+
+内容如 `Asia/Shanghai` 等, 参考 [https://timezonedb.com/time-zones](https://timezonedb.com/time-zones)
+
+两个特殊值: `UTC` `Local`
 
 #### bulk_actions
 
@@ -338,6 +383,8 @@ bytes_source_field优先级高于source_field.  bytes_source_field是指字段�
 ```
 Clickhouse:
     table: 'hotel.weblog'
+	username: admin
+	password: XXX
     hosts:
     - 'tcp://10.100.0.101:9000'
     - 'tcp://10.100.0.102:9000'
@@ -400,21 +447,27 @@ Drop:
 
 也支持括号, 像 `Exist(a) && (Exist(b) || Exist(c))`
 
-目前支持的函数: **只有 EQ 函数需要使用双引号代表字符串, 因为 EQ 也可能做数字的比较, 其他所有函数都不需要双引号, 因为他们肯定是字符串函数**
+目前支持的函数如下:
+
+注意:
+
+**只有 EQ 函数需要使用双引号代表字符串, 因为 EQ 也可能做数字的比较, 其他所有函数都不需要双引号, 因为他们肯定是字符串函数**
+
+**EQ HasPrefix HasSuffix Contains Match , 这几个函数可以使用 jsonpath 表示, 除 EQ 外需要使用双引号**
 
 - `Exist(user,name)` [user][name]存在
 
-- `EQ(user,age,20)` [user][age]存在并等于20
+- `EQ(user,age,20)` `EQ($.user.age,20)` [user][age]存在并等于20
 
-- `EQ(user,age,"20")` [user][age]存在并等于"20" (字符串)
+- `EQ(user,age,"20")` `EQ($.user.age,20)` [user][age]存在并等于"20" (字符串)
 
-- `HasPrefix(user,name,liu)` [user][name]存在并以 liu 开头
+- `HasPrefix(user,name,liu)` `HasPrefix($.user.name,"liu")` [user][name]存在并以 liu 开头
 
-- `HasSuffix(user,name,jia)` [user][name]存在并以 jia 结尾
+- `HasSuffix(user,name,jia)` `HasSuffix($.user.name,"jia")` [user][name]存在并以 jia 结尾
 
-- `Contains(user,name,jia)` [user][name]存在并包含 jia
+- `Contains(user,name,jia)` `Contains($.user.name,"jia")` [user][name]存在并包含 jia
 
-- `Match(user,name,^liu.*a$)` [user][name]存在并能匹配正则 `^liu.*a$`
+- `Match(user,name,^liu.*a$)` `Match($.user.name,"^liu.*a$")` [user][name]存在并能匹配正则 `^liu.*a$`
 
 - `Random(20)` 1/20 的概率返回 true
 
@@ -602,6 +655,10 @@ Grok:
 #### src
 
 源字段, 默认 message
+
+#### target
+
+目标字段, 默认为空, 直接写入根下. 如果不为空, 则创建target字段, 并把解析后的字段写到target下.
 
 #### match
 

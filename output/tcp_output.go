@@ -11,7 +11,6 @@ import (
 )
 
 type TCPOutput struct {
-	BaseOutput
 	config    map[interface{}]interface{}
 	network   string
 	address   string
@@ -26,9 +25,8 @@ type TCPOutput struct {
 	dialLock sync.Mutex
 }
 
-func NewTCPOutput(config map[interface{}]interface{}) *TCPOutput {
+func (l *MethodLibrary) NewTCPOutput(config map[interface{}]interface{}) *TCPOutput {
 	p := &TCPOutput{
-		BaseOutput: NewBaseOutput(config),
 		config:     config,
 		concurrent: 1,
 	}

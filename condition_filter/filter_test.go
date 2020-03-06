@@ -5,6 +5,105 @@ import (
 	"time"
 )
 
+func TestEQJsonpathSyntaxError(t *testing.T) {
+	condition := `EQ($.name.first,jia) && EQ($.name.last,liu)`
+	_, err := parseBoolTree(condition)
+	if err == nil {
+		t.Errorf("%s should have error", condition)
+	}
+}
+
+func TestEQJsonpathSingleCondition(t *testing.T) {
+	condition := `EQ($.name.first,"jia")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "jia", "last": "liu"}
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
+func TestEQJsonpath(t *testing.T) {
+	condition := `EQ($.name.first,"jia") && EQ($.name.last,"liu")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "jia", "last": "liu"}
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
+func TestHasPrefixJsonpath(t *testing.T) {
+	condition := `HasPrefix($.name.first,"jia") || HasPrefix($.name.last,"liu")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "ji", "last": "liuu"}
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
+func TestHasSuffixJsonpath(t *testing.T) {
+	condition := `HasSuffix($.name.first,"jia") || HasSuffix($.name.last,"liu")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "ji", "last": "uliu"}
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
+func TestMatchJsonpath(t *testing.T) {
+	condition := `Match($.name.first,"^jia$") && Match($.fullname,"^liu,jia$")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "jia", "last": "liu"}
+	event["fullname"] = "liu,jia"
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
+func TestContainsJsonpath(t *testing.T) {
+	condition := `Contains($.name.first,"jia") || Contains($.name.last,"liu")`
+	root, err := parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error", condition)
+	}
+
+	event := make(map[string]interface{})
+	event["name"] = map[string]interface{}{"first": "ji", "last": "uliu"}
+	pass := root.Pass(event)
+	if !pass {
+		t.Errorf("pass failed. `%s` %#v", condition, event)
+	}
+}
+
 func TestNotBeforeAnd(t *testing.T) {
 	condition := `EQ(name,first,"jia") ! && EQ(name,last,"liu")`
 	_, err := parseBoolTree(condition)

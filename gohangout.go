@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/childe/gohangout/input"
+	"github.com/childe/gohangout/topology"
 	"github.com/golang/glog"
 	jsoniter "github.com/json-iterator/go"
 )
@@ -24,6 +25,12 @@ var options = &struct {
 	cpuprofile string
 	memprofile string
 }{}
+
+var gitCommit string
+
+func printVersion() {
+	glog.Info("Current build version: ", gitCommit)
+}
 
 var (
 	worker = flag.Int("worker", 1, "worker thread count")
@@ -40,11 +47,15 @@ func init() {
 	flag.Parse()
 }
 
+func init() {
+	printVersion()
+}
+
 func buildPluginLink(config map[string]interface{}) []*input.InputBox {
 	boxes := make([]*input.InputBox, 0)
 
 	for inputIdx, inputI := range config["inputs"].([]interface{}) {
-		var inputPlugin input.Input
+		var inputPlugin topology.Input
 
 		i := inputI.(map[interface{}]interface{})
 		glog.Infof("input[%d] %v", inputIdx+1, i)

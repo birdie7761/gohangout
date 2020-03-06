@@ -18,7 +18,7 @@ type StdinInput struct {
 	stop bool
 }
 
-func NewStdinInput(config map[interface{}]interface{}) *StdinInput {
+func (l *MethodLibrary) NewStdinInput(config map[interface{}]interface{}) *StdinInput {
 	var codertype string = "plain"
 	if v, ok := config["codec"]; ok {
 		codertype = v.(string)
@@ -48,7 +48,7 @@ func NewStdinInput(config map[interface{}]interface{}) *StdinInput {
 	return p
 }
 
-func (p *StdinInput) readOneEvent() map[string]interface{} {
+func (p *StdinInput) ReadOneEvent() map[string]interface{} {
 	text, more := <-p.messages
 	if !more || text == nil {
 		return nil

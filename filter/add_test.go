@@ -9,8 +9,9 @@ func TestAddFilter(t *testing.T) {
 	config := make(map[interface{}]interface{})
 	fields := make(map[interface{}]interface{})
 	fields["name"] = `{{.first}} {{.last}}`
+	fields["firstname"] = `$.first`
 	config["fields"] = fields
-	f := NewAddFilter(config)
+	f := methodLibrary.NewAddFilter(config)
 
 	event := make(map[string]interface{})
 	event["@timestamp"] = time.Now().Unix()
@@ -31,5 +32,13 @@ func TestAddFilter(t *testing.T) {
 	}
 	if name != "dehua liu" {
 		t.Error("name field should be `dehua liu`")
+	}
+
+	firstname, ok := event["firstname"]
+	if ok == false {
+		t.Error("add filter should add `firstname` field")
+	}
+	if firstname != "dehua" {
+		t.Error("firstname field should be `dehua`")
 	}
 }

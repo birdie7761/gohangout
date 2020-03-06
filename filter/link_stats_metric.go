@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/childe/gohangout/topology"
 	"github.com/golang/glog"
 )
 
@@ -18,7 +19,7 @@ type stats struct {
 }
 
 type LinkStatsMetricFilter struct {
-	box               *FilterBox
+	next              topology.Processor
 	config            map[interface{}]interface{}
 	timestamp         string
 	batchWindow       int64
@@ -39,11 +40,11 @@ type LinkStatsMetricFilter struct {
 	mutex sync.Locker
 }
 
-func (f *LinkStatsMetricFilter) SetBelongTo(box *FilterBox) {
-	f.box = box
+func (f *LinkStatsMetricFilter) SetBelongTo(next topology.Processor) {
+	f.next = next
 }
 
-func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetricFilter {
+func (l *MethodLibrary) NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetricFilter {
 	p := &LinkStatsMetricFilter{
 		config:       config,
 		metric:       make(map[int64]interface{}),
@@ -286,8 +287,7 @@ func (f *LinkStatsMetricFilter) emitMetrics() {
 	for timestamp, metrics := range f.metricToEmit {
 		for _, event = range f.metricToEvents(metrics.(map[interface{}]interface{}), 0) {
 			event[f.timestamp] = time.Unix(timestamp, 0)
-			f.box.PostProcess(event, true)
-			f.box.nexter.Process(event)
+			f.next.Process(event)
 		}
 	}
 	f.metricToEmit = make(map[int64]interface{})

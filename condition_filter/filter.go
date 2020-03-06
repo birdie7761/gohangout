@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oliveagle/jsonpath"
+
 	"github.com/childe/gohangout/value_render"
 	"github.com/golang/glog"
 )
@@ -38,19 +40,19 @@ func NewTemplateConditionFilter(condition string) *TemplateCondition {
 }
 
 type ExistCondition struct {
-	pathes []string
+	paths []string
 }
 
-func NewExistCondition(pathes []string) *ExistCondition {
-	return &ExistCondition{pathes}
+func NewExistCondition(paths []string) *ExistCondition {
+	return &ExistCondition{paths}
 }
 
 func (c *ExistCondition) Pass(event map[string]interface{}) bool {
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -62,32 +64,81 @@ func (c *ExistCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if _, ok := o[c.pathes[length-1]]; ok {
+	if _, ok := o[c.paths[length-1]]; ok {
 		return true
 	}
 	return false
 }
 
 type EQCondition struct {
-	pathes []string
-	value  interface{}
-	fn     int
+	pat   *jsonpath.Compiled
+	paths []string
+	value interface{}
+	fn    int
 }
 
-func NewEQCondition(pathes []string, value interface{}) *EQCondition {
-	return &EQCondition{pathes, value, len(pathes)}
+func NewEQCondition(c string) (*EQCondition, error) {
+	var (
+		pat   *jsonpath.Compiled
+		paths []string
+		value string
+		err   error
+	)
+
+	if strings.HasPrefix(c, `EQ($.`) {
+		p := regexp.MustCompile(`^EQ\((\$\..*),(.*)\)$`)
+		r := p.FindStringSubmatch(c)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("split jsonpath pattern/value error in `%s`", c)
+		}
+
+		if pat, err = jsonpath.Compile(r[1]); err != nil {
+			return nil, err
+		}
+
+		value = r[2]
+	} else {
+		paths = make([]string, 0)
+		c = strings.TrimSuffix(strings.TrimPrefix(c, "EQ("), ")")
+		for _, p := range strings.Split(c, ",") {
+			paths = append(paths, strings.Trim(p, " "))
+		}
+		value = paths[len(paths)-1]
+		paths = paths[:len(paths)-1]
+	}
+
+	if value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+		return &EQCondition{pat, paths, value, len(paths)}, nil
+	}
+	if strings.Contains(value, ".") {
+		if s, err := strconv.ParseFloat(value, 64); err == nil {
+			return &EQCondition{pat, paths, s, len(paths)}, nil
+		} else {
+			return nil, err
+		}
+	}
+	if s, err := strconv.ParseInt(value, 0, 32); err == nil {
+		return &EQCondition{pat, paths, int(s), len(paths)}, nil
+	} else {
+		return nil, err
+	}
+	return &EQCondition{pat, paths, value, len(paths)}, nil
 }
 
 func (c *EQCondition) Pass(event map[string]interface{}) bool {
+	if c.pat != nil {
+		v, err := c.pat.Lookup(event)
+		return err == nil && v == c.value
+	}
+
 	var (
 		o map[string]interface{} = event
 	)
 
-	for _, path := range c.pathes[:c.fn-1] {
+	for _, path := range c.paths[:c.fn-1] {
 		if v, ok := o[path]; ok && v != nil {
-			if reflect.TypeOf(v).Kind() == reflect.Map {
-				o = v.(map[string]interface{})
-			} else {
+			if o, ok = v.(map[string]interface{}); !ok {
 				return false
 			}
 		} else {
@@ -95,28 +146,57 @@ func (c *EQCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[c.fn-1]]; ok {
+	if v, ok := o[c.paths[c.fn-1]]; ok {
 		return v == c.value
 	}
 	return false
 }
 
 type HasPrefixCondition struct {
-	pathes []string
+	pat    *jsonpath.Compiled
+	paths  []string
 	prefix string
 }
 
-func NewHasPrefixCondition(pathes []string, prefix string) *HasPrefixCondition {
-	return &HasPrefixCondition{pathes, prefix}
+func NewHasPrefixCondition(c string) (*HasPrefixCondition, error) {
+	if strings.HasPrefix(c, `HasPrefix($.`) {
+		p := regexp.MustCompile(`^HasPrefix\((\$\..*),"(.*)"\)$`)
+		r := p.FindStringSubmatch(c)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("split jsonpath pattern/value error in `%s`", c)
+		}
+
+		value := r[2]
+		pat, err := jsonpath.Compile(r[1])
+		if err != nil {
+			return nil, err
+		}
+
+		return &HasPrefixCondition{pat, nil, value}, nil
+	}
+
+	paths := make([]string, 0)
+	c = strings.TrimSuffix(strings.TrimPrefix(c, "HasPrefix("), ")")
+	for _, p := range strings.Split(c, ",") {
+		paths = append(paths, strings.Trim(p, " "))
+	}
+	value := paths[len(paths)-1]
+	paths = paths[:len(paths)-1]
+	return &HasPrefixCondition{nil, paths, value}, nil
 }
 
 func (c *HasPrefixCondition) Pass(event map[string]interface{}) bool {
+	if c.pat != nil {
+		v, err := c.pat.Lookup(event)
+		return err == nil && strings.HasPrefix(v.(string), c.prefix)
+	}
+
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
 
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -128,7 +208,7 @@ func (c *HasPrefixCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[length-1]]; ok && v != nil {
+	if v, ok := o[c.paths[length-1]]; ok && v != nil {
 		if reflect.TypeOf(v).Kind() == reflect.String {
 			return strings.HasPrefix(v.(string), c.prefix)
 		}
@@ -137,21 +217,50 @@ func (c *HasPrefixCondition) Pass(event map[string]interface{}) bool {
 }
 
 type HasSuffixCondition struct {
-	pathes []string
+	pat    *jsonpath.Compiled
+	paths  []string
 	suffix string
 }
 
-func NewHasSuffixCondition(pathes []string, suffix string) *HasSuffixCondition {
-	return &HasSuffixCondition{pathes, suffix}
+func NewHasSuffixCondition(c string) (*HasSuffixCondition, error) {
+	if strings.HasPrefix(c, `HasSuffix($.`) {
+		p := regexp.MustCompile(`^HasSuffix\((\$\..*),"(.*)"\)$`)
+		r := p.FindStringSubmatch(c)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("split jsonpath pattern/value error in `%s`", c)
+		}
+
+		value := r[2]
+		pat, err := jsonpath.Compile(r[1])
+		if err != nil {
+			return nil, err
+		}
+
+		return &HasSuffixCondition{pat, nil, value}, nil
+	}
+
+	paths := make([]string, 0)
+	c = strings.TrimSuffix(strings.TrimPrefix(c, "HasSuffix("), ")")
+	for _, p := range strings.Split(c, ",") {
+		paths = append(paths, strings.Trim(p, " "))
+	}
+	value := paths[len(paths)-1]
+	paths = paths[:len(paths)-1]
+	return &HasSuffixCondition{nil, paths, value}, nil
 }
 
 func (c *HasSuffixCondition) Pass(event map[string]interface{}) bool {
+	if c.pat != nil {
+		v, err := c.pat.Lookup(event)
+		return err == nil && strings.HasSuffix(v.(string), c.suffix)
+	}
+
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
 
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -163,7 +272,7 @@ func (c *HasSuffixCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[length-1]]; ok && v != nil {
+	if v, ok := o[c.paths[length-1]]; ok && v != nil {
 		if reflect.TypeOf(v).Kind() == reflect.String {
 			return strings.HasSuffix(v.(string), c.suffix)
 		}
@@ -172,21 +281,49 @@ func (c *HasSuffixCondition) Pass(event map[string]interface{}) bool {
 }
 
 type ContainsCondition struct {
-	pathes    []string
+	pat       *jsonpath.Compiled
+	paths     []string
 	substring string
 }
 
-func NewContainsCondition(pathes []string, substring string) *ContainsCondition {
-	return &ContainsCondition{pathes, substring}
+func NewContainsCondition(c string) (*ContainsCondition, error) {
+	if strings.HasPrefix(c, `Contains($.`) {
+		p := regexp.MustCompile(`^Contains\((\$\..*),"(.*)"\)$`)
+		r := p.FindStringSubmatch(c)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("split jsonpath pattern/value error in `%s`", c)
+		}
+
+		value := r[2]
+		pat, err := jsonpath.Compile(r[1])
+		if err != nil {
+			return nil, err
+		}
+
+		return &ContainsCondition{pat, nil, value}, nil
+	}
+	paths := make([]string, 0)
+	c = strings.TrimSuffix(strings.TrimPrefix(c, "Contains("), ")")
+	for _, p := range strings.Split(c, ",") {
+		paths = append(paths, strings.Trim(p, " "))
+	}
+	value := paths[len(paths)-1]
+	paths = paths[:len(paths)-1]
+	return &ContainsCondition{nil, paths, value}, nil
 }
 
 func (c *ContainsCondition) Pass(event map[string]interface{}) bool {
+	if c.pat != nil {
+		v, err := c.pat.Lookup(event)
+		return err == nil && strings.Contains(v.(string), c.substring)
+	}
+
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
 
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -198,7 +335,7 @@ func (c *ContainsCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[length-1]]; ok && v != nil {
+	if v, ok := o[c.paths[length-1]]; ok && v != nil {
 		if reflect.TypeOf(v).Kind() == reflect.String {
 			return strings.Contains(v.(string), c.substring)
 		}
@@ -207,21 +344,21 @@ func (c *ContainsCondition) Pass(event map[string]interface{}) bool {
 }
 
 type ContainsAnyCondition struct {
-	pathes    []string
+	paths     []string
 	substring string
 }
 
-func NewContainsAnyCondition(pathes []string, substring string) *ContainsAnyCondition {
-	return &ContainsAnyCondition{pathes, substring}
+func NewContainsAnyCondition(paths []string, substring string) *ContainsAnyCondition {
+	return &ContainsAnyCondition{paths, substring}
 }
 
 func (c *ContainsAnyCondition) Pass(event map[string]interface{}) bool {
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
 
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -233,7 +370,7 @@ func (c *ContainsAnyCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[length-1]]; ok && v != nil {
+	if v, ok := o[c.paths[length-1]]; ok && v != nil {
 		if reflect.TypeOf(v).Kind() == reflect.String {
 			return strings.ContainsAny(v.(string), c.substring)
 		}
@@ -242,25 +379,58 @@ func (c *ContainsAnyCondition) Pass(event map[string]interface{}) bool {
 }
 
 type MatchCondition struct {
-	pathes []string
+	pat    *jsonpath.Compiled
+	paths  []string
 	regexp *regexp.Regexp
 }
 
-func NewMatchCondition(pathes []string, pattern string) (*MatchCondition, error) {
-	regexp, err := regexp.Compile(pattern)
+func NewMatchCondition(c string) (*MatchCondition, error) {
+	if strings.HasPrefix(c, `Match($.`) {
+		p := regexp.MustCompile(`^Match\((\$\..*),"(.*)"\)$`)
+		r := p.FindStringSubmatch(c)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("split jsonpath pattern/value error in `%s`", c)
+		}
+
+		pat, err := jsonpath.Compile(r[1])
+		if err != nil {
+			return nil, err
+		}
+
+		value := r[2]
+		regexp, err := regexp.Compile(value)
+		if err != nil {
+			return nil, err
+		}
+
+		return &MatchCondition{pat, nil, regexp}, nil
+	}
+
+	paths := make([]string, 0)
+	c = strings.TrimSuffix(strings.TrimPrefix(c, "Match("), ")")
+	for _, p := range strings.Split(c, ",") {
+		paths = append(paths, strings.Trim(p, " "))
+	}
+	value := paths[len(paths)-1]
+	paths = paths[:len(paths)-1]
+	regexp, err := regexp.Compile(value)
 	if err != nil {
 		return nil, err
 	}
-	return &MatchCondition{pathes, regexp}, nil
+	return &MatchCondition{nil, paths, regexp}, nil
 }
 
 func (c *MatchCondition) Pass(event map[string]interface{}) bool {
+	if c.pat != nil {
+		v, err := c.pat.Lookup(event)
+		return err == nil && c.regexp.MatchString(v.(string))
+	}
 	var (
 		o      map[string]interface{} = event
-		length int                    = len(c.pathes)
+		length int                    = len(c.paths)
 	)
 
-	for _, path := range c.pathes[:length-1] {
+	for _, path := range c.paths[:length-1] {
 		if v, ok := o[path]; ok && v != nil {
 			if reflect.TypeOf(v).Kind() == reflect.Map {
 				o = v.(map[string]interface{})
@@ -272,7 +442,7 @@ func (c *MatchCondition) Pass(event map[string]interface{}) bool {
 		}
 	}
 
-	if v, ok := o[c.pathes[length-1]]; ok && v != nil {
+	if v, ok := o[c.paths[length-1]]; ok && v != nil {
 		if reflect.TypeOf(v).Kind() == reflect.String {
 			return c.regexp.MatchString(v.(string))
 		}
@@ -356,99 +526,48 @@ func NewSingleCondition(c string) (Condition, error) {
 	// Exist
 	if matched, _ := regexp.MatchString(`^Exist\(.*\)$`, c); matched {
 		c = strings.TrimSuffix(strings.TrimPrefix(c, "Exist("), ")")
-		pathes := make([]string, 0)
+		paths := make([]string, 0)
 		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
+			paths = append(paths, strings.Trim(p, " "))
 		}
-		return NewExistCondition(pathes), nil
+		return NewExistCondition(paths), nil
 	}
 
 	// EQ
 	if matched, _ := regexp.MatchString(`^EQ\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
-		c = strings.TrimSuffix(strings.TrimPrefix(c, "EQ("), ")")
-		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
-		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-
-		if value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
-			return NewEQCondition(pathes, value), nil
-		}
-		if strings.Contains(value, ".") {
-			if s, err := strconv.ParseFloat(value, 64); err == nil {
-				return NewEQCondition(pathes, s), nil
-			} else {
-				return nil, err
-			}
-		}
-		if s, err := strconv.ParseInt(value, 0, 32); err == nil {
-			return NewEQCondition(pathes, int(s)), nil
-		} else {
-			return nil, err
-		}
+		return NewEQCondition(c)
 	}
 
 	// HasPrefix
 	if matched, _ := regexp.MatchString(`^HasPrefix\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
-		c = strings.TrimSuffix(strings.TrimPrefix(c, "HasPrefix("), ")")
-		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
-		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-		return NewHasPrefixCondition(pathes, value), nil
+		return NewHasPrefixCondition(c)
 	}
 
 	// HasSuffix
 	if matched, _ := regexp.MatchString(`^HasSuffix\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
-		c = strings.TrimSuffix(strings.TrimPrefix(c, "HasSuffix("), ")")
-		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
-		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-		return NewHasSuffixCondition(pathes, value), nil
+		return NewHasSuffixCondition(c)
 	}
 
 	// Contains
 	if matched, _ := regexp.MatchString(`^Contains\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
-		c = strings.TrimSuffix(strings.TrimPrefix(c, "Contains("), ")")
-		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
-		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-		return NewContainsCondition(pathes, value), nil
+		return NewContainsCondition(c)
 	}
 
 	// ContainsAny
 	if matched, _ := regexp.MatchString(`^ContainsAny\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
+		paths := make([]string, 0)
 		c = strings.TrimSuffix(strings.TrimPrefix(c, "ContainsAny("), ")")
 		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
+			paths = append(paths, strings.Trim(p, " "))
 		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-		return NewContainsAnyCondition(pathes, value), nil
+		value := paths[len(paths)-1]
+		paths = paths[:len(paths)-1]
+		return NewContainsAnyCondition(paths, value), nil
 	}
 
 	// Match
 	if matched, _ := regexp.MatchString(`^Match\(.*\)$`, c); matched {
-		pathes := make([]string, 0)
-		c = strings.TrimSuffix(strings.TrimPrefix(c, "Match("), ")")
-		for _, p := range strings.Split(c, ",") {
-			pathes = append(pathes, strings.Trim(p, " "))
-		}
-		value := pathes[len(pathes)-1]
-		pathes = pathes[:len(pathes)-1]
-		return NewMatchCondition(pathes, value)
+		return NewMatchCondition(c)
 	}
 
 	// Random
